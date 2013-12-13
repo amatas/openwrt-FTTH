@@ -1,0 +1,133 @@
+#!/bin/sh
+#
+# Copyright (C) 2013 Alfredo Matas
+# Author: Alfredo Matas (http://www.alfredomatas.es)
+# License: http://www.gnu.org/licenses/gpl.html GPL version 2 or higher
+#
+
+. /lib/functions/uci-defaults.sh
+. /lib/ar71xx.sh
+
+ucidef_set_interface_loopback
+
+board=$(ar71xx_board_name)
+
+case "$board" in
+
+
+tl-wr1043nd)
+    uci batch << EOF
+set network.@switch[0]=switch
+set network.@switch[0].name=rtl8366rb
+set network.@switch[0].reset=1
+set network.@switch[0].enable_vlan=1
+set network.@switch[0].enable_vlan4k=1
+set network.@switch_vlan[0]=switch_vlan
+set network.@switch_vlan[0].device=rtl8366rb
+set network.@switch_vlan[0].vlan=1
+set network.@switch_vlan[0].ports='1 2 3 4 5t'
+set network.@switch_vlan[1]=switch_vlan
+set network.@switch_vlan[1].device=rtl8366rb
+set network.@switch_vlan[1].ports='0t 5t'
+set network.@switch_vlan[1].vlan=6
+add network switch_vlan
+set network.@switch_vlan[-1]=switch_vlan
+set network.@switch_vlan[-1].device=rtl8366rb
+set network.@switch_vlan[-1].ports='0t 5t'
+set network.@switch_vlan[-1].vlan=3
+commit network
+EOF
+
+    IF_WAN="eth0.6"
+    IF_VOIP="eth0.3"
+    ;;
+
+wrt160nl)
+    uci batch << EOF
+set network.@switch[0]=switch
+set network.@switch[0].name=eth0
+set network.@switch[0].reset=1
+set network.@switch[0].enable_vlan=1
+set network.@switch[0].enable_vlan4k=1
+set network.@switch_vlan[0]=switch_vlan
+set network.@switch_vlan[0].device=eth0
+set network.@switch_vlan[0].vlan=1
+set network.@switch_vlan[0].ports='0 1 2 3 4 5'
+commit network
+EOF
+    IF_WAN="eth1.6"
+    IF_VOIP="eth1.3"
+    ;;
+
+esac
+
+uci batch << EOF
+set network.wan=interface
+set network.wan.proto=pppoe
+set network.wan.username=adslppp@telefonicanetpa
+set network.wan.password=adslppp
+set network.wan.ifname=$IF_WAN
+set network.voip=interface
+set network.voip.proto=dhcp
+set network.voip.ifname=$IF_VOIP
+set network.voip.accept_ra=0
+set network.voip.defaultroute=0
+set network.voip.peerdns=0
+commit network
+EOF
+
+uci batch << EOF
+add firewall zone
+set firewall.@zone[-1]=zone
+set firewall.@zone[-1].name=voip
+set firewall.@zone[-1].input=ACCEPT
+set firewall.@zone[-1].forward=REJECT
+set firewall.@zone[-1].output=ACCEPT
+set firewall.@zone[-1].network=voip
+set firewall.@zone[-1].masq=1
+set firewall.@zone[-1].mtu_fix=1
+add firewall forwarding
+set firewall.@forwarding[-1]=forwarding
+set firewall.@forwarding[-1].src=lan
+set firewall.@forwarding[-1].dest=voip
+commit firewall
+EOF
+
+cat > /etc/bird4.conf << EOF
+log syslog {error};
+protocol kernel {
+ import all;
+ export all;
+ persist;
+ scan time 60;
+}
+protocol device {
+ scan time 30;
+}
+protocol static {
+ export none;
+}
+protocol rip {
+ export all;
+ import all;
+ interface "$IF_VOIP";
+}
+EOF
+
+uci batch << EOF
+set igmpproxy.@igmpproxy[0]=igmpproxy
+set igmpproxy.@igmpproxy[0].quickleave=1
+set igmpproxy.@phyint[0]=phyint
+set igmpproxy.@phyint[0].network=voip
+set igmpproxy.@phyint[0].direction=upstream
+set igmpproxy.@phyint[0].altnet=192.168.1.0/24
+set igmpproxy.@phyint[1]=phyint
+set igmpproxy.@phyint[1].network=lan
+set igmpproxy.@phyint[1].direction=downstream
+commit igmpproxy
+EOF
+
+/etc/init.d/igmpproxy restart
+/etc/init.d/bird4 restart
+
+exit 0
