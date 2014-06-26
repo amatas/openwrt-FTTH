@@ -11,7 +11,7 @@ How to build
 First of all you need a Linux distribution with development packages. For 
 example, in a Debian based distribution you can ejecute:
 
-        apt-get install git build-essential
+        apt-get install git build-essential subversion
 
 Then you will have to execute the build-firmware.sh:
 
